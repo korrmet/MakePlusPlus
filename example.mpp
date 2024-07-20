@@ -1,0 +1,25 @@
+# CONFIGURATION
+
+variable "cc", "path", "cc_abs"
+assign "cc_abs" "$(path)/$(cc)";
+
+variable "version";
+assign "version" "0.1a";
+
+menu_item       "path_item";
+link_variable   "path";
+
+menu_item       "cc_item";
+link_variable   "cc_item" "cc"
+add_description "cc_item" "C Compiler";
+add_default     "cc_item" "gcc";
+add_case        "cc_item" "gcc";
+add_case        "cc_item" "clang";
+
+# REQUIREMENTS
+
+# BUILD
+
+# TEST
+
+# DEPLOY
