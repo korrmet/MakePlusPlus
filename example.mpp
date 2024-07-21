@@ -1,25 +1,26 @@
-# CONFIGURATION
+* CONFIGURATION
 
-variable "cc", "path", "cc_abs"
-assign "cc_abs" "$(path)/$(cc)";
+# A simple example of configuring compiler
+variable cc path cc_abs
+assign $(path)/$(cc) cc_abs
 
-variable "version";
-assign "version" "0.1a";
+variable version
+assign "0.1a"
 
-menu_item       "path_item";
-link_variable   "path";
+menu_item       path_item
+link_variable   path
 
-menu_item       "cc_item";
-link_variable   "cc_item" "cc"
-add_description "cc_item" "C Compiler";
-add_default     "cc_item" "gcc";
-add_case        "cc_item" "gcc";
-add_case        "cc_item" "clang";
+menu_item       cc_item
+link_variable   cc
+add_description "C Compiler"
+add_default     gcc
+add_case        gcc
+add_case        clang
 
-# REQUIREMENTS
+* REQUIREMENTS
 
-# BUILD
+* BUILD
 
-# TEST
+* TEST
 
-# DEPLOY
+* DEPLOY
