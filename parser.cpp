@@ -1,250 +1,365 @@
-#include "Independency/independency.hpp"
+#include "parser.hpp"
 #include <cstdio>
-#include <fstream>
 
-class mpp_parser
-{ public:
-  mpp_parser(independency::storage& storage)
-  : storage(storage), current_mode(mode::idle) {}
+mpp_parser::mpp_parser(independency::storage& storage)
+: storage(storage), current_mode(mode::idle),
+  req_stage(req_parsing_stage::empty_line) {}
   
-  bool input(std::string line)
-  { if (line[0] == '#')
-    { std::printf("--> comment\n"); return true; }
+bool mpp_parser::input(std::string line)
+{ if (line[0] == '#') { return true; }
 
-    if (line[0] == '*')
-    { if (line == "* CONFIGURATION")
-      { current_mode = mode::configuration;
-        std::printf("--> switch to configuration mode\n");
-        return true; }
+  if (line[0] == '*')
+  { if (line == "* CONFIGURATION")
+    { current_mode = mode::configuration;
+      return true; }
 
-      else if (line == "* REQUIREMENTS")
-      { current_mode = mode::requirements;
-        std::printf("--> switch to requirements mode\n");
-        return true; }
+    else if (line == "* REQUIREMENTS")
+    { current_mode = mode::requirements;
+      return true; }
 
-      else if (line == "* BUILD")
-      { current_mode = mode::build;
-        std::printf("--> switch to build mode\n");
-        return true; }
+    else if (line == "* BUILD")
+    { current_mode = mode::build;
+      return true; }
 
-      else if (line == "* TEST")
-      { current_mode = mode::test;
-        std::printf("--> switch to test mode\n");
-        return true; }
+    else if (line == "* TEST")
+    { current_mode = mode::test;
+      return true; }
 
-      else if (line == "* DEPLOY")
-      { current_mode = mode::deploy;
-        std::printf("--> switch to deploy mode\n");
+    else if (line == "* DEPLOY")
+    { current_mode = mode::deploy;
+      return false; }
+
+    else
+    { std::printf("--> Unknown section header \"%s\"\n", line.c_str());
+      return false; } }
+
+  switch (current_mode)
+  { case mode::idle: break;
+
+    case mode::configuration: return conf_translator(tokenizer(line));
+    case mode::requirements: return req_translator(line);
+    case mode::build: return build_translator(tokenizer(line));
+    case mode::test: return test_translator(tokenizer(line));
+    case mode::deploy: return deploy_translator(tokenizer(line));
+    default: break; }
+
+  return true; }
+
+std::vector<std::string> mpp_parser::tokenizer(std::string line)
+{ std::vector<std::string> tokens;
+
+  std::string current; bool inside_braces = false; bool escape = false;
+
+  for (char c : line)
+  { if (escape) { current.push_back(c); escape = false; continue; }
+    if (inside_braces)
+    { if (c == '\\') { escape = true; continue; }
+      if (c == '"') { inside_braces = false; continue; } }
+    else
+    { if (c == ' ' || c == '\t')
+      { if (current.size()) { tokens.push_back(current); }
+        current.clear();
+        continue; } }
+
+    if (c == '"') { inside_braces = true; continue; }
+
+    current.push_back(c); }
+
+  if (current.size()) { tokens.push_back(current); }
+
+  return tokens; }
+
+bool mpp_parser::conf_translator(std::vector<std::string> tokens)
+{ if (!tokens.size()) { return true; }
+
+  if (tokens[0] == "variable")
+  { if (tokens.size() <= 1)
+    { std::printf("--> 'variable' command requires at least one argument\n");
+      return false; }
+
+    for (unsigned int i = 1; i < tokens.size(); i++)
+    { storage[root/"variables"/tokens[i]] = ""; context = tokens[i]; } }
+
+  else if (tokens[0] == "assign")
+  { if (tokens.size() == 2)
+    { if (context.empty())
+      { std::printf("--> context is empty, nowhere to assign\n");
         return false; }
 
-      else
-      { std::printf("--> Unknown section header \"%s\"\n", line.c_str());
+      if (!storage.chk(root/"variables"/context))
+      { std::printf("--> unknown variable \"%s\"\n", context.c_str());
         return false; }
-    }
 
-    switch (current_mode)
-    { case mode::idle: break;
+      storage[root/"variables"/context] = tokens[1]; }
+    
+    else if (tokens.size() == 3)
+    { if (!storage.chk(root/"variables"/tokens[2]))
+      { std::printf("--> unknown variable \"%s\"\n", tokens[2].c_str());
+        return false; }
 
-      case mode::configuration:
-      { std::printf("--> Tokens:\n");
-        unsigned int count = 0;
-        std::list<std::string> tokens = conf_tokenizer(line);
-        for (std::string token : tokens)
-        { std::printf("--> %3d: %s\n", count++, token.c_str()); }
+      storage[root/"variables"/tokens[2]] = tokens[1]; }
 
-        conf_translator(tokens);
-      } break;
-      
-      case mode::requirements: break;
-      case mode::build: break;
-      case mode::test: break;
-      case mode::deploy: break;
-      default: break; }
+    else { std::printf("--> 'assign' command requires 2 or 3 argments\n");
+           return false; } }
 
-    return true; }
+  else if (tokens[0] == "menu_item")
+  { if (tokens.size() <= 1)
+    { std::printf("--> 'menu_item' command requires at least one "
+                  "argument\n");
+      return false; }
 
-  private:
-  enum class mode { configuration, requirements, build, test, deploy, idle }
-  current_mode;
-  independency::storage& storage;
+    for (unsigned int i = 1; i < tokens.size(); i++)
+    { storage[root/"menu items"/tokens[i]] = ""; context = tokens[i]; } }
+  
+  else if (tokens[0] == "link_variable")
+  { if (tokens.size() == 2)
+    { if (context.empty()) 
+      { std::printf("--> context is empty, nowhere to link\n");
+        return false; }
 
-  enum class conf_command
-  { unknown, variable, assign, menu_item, link_variable, add_description,
-    add_default, add_case };
+      if (!storage.chk(root/"menu items"/context))
+      { std::printf("--> unknown menu item \"%s\"\n", context.c_str());
+        return false; }
 
-  std::list<std::string> conf_tokenizer(std::string line)
-  { std::list<std::string> tokens;
+      storage[root/"menu items"/context/"variable"] = tokens[1]; }
 
-    std::string current; bool inside_braces = false; bool escape = false;
+    else if (tokens.size() == 3)
+    { if (!storage.chk(root/"menu items"/tokens[2]))
+      { std::printf("--> unknown menu item \"%s\"\n", tokens[2].c_str());
+        return false; }
 
-    for (char c : line)
-    { if (escape) { current.push_back(c); escape = false; continue; }
-      if (inside_braces)
-      { if (c == '\\') { escape = true; continue; }
-        if (c == '"') { inside_braces = false; continue; } }
-      else
-      { if (c == ' ' || c == '\t')
-        { if (current.size()) { tokens.push_back(current); }
-          current.clear();
-          continue; } }
+      storage[root/"menu items"/tokens[2]] = tokens[1]; }
 
-      if (c == '"') { inside_braces = true; continue; }
+    else { std::printf("--> 'link_variable' command requires 2 or 3 "
+                       "arguments\n");
+           return false; } }
+  
+  else if (tokens[0] == "add_description")
+  { if (tokens.size() == 2)
+    { if (context.empty())
+      { std::printf("--> context is empty, nowhere to add description\n");
+        return false; }
 
-      current.push_back(c); }
+      if (!storage.chk(root/"menu items"/context))
+      { std::printf("--> unknown menu item \"%s\"\n", context.c_str());
+        return false; }
 
-    if (current.size()) { tokens.push_back(current); }
+      storage[root/"menu items"/context/"description"] = tokens[1]; }
+    
+    else if (tokens.size() == 3)
+    { if (!storage.chk(root/"menu items"/tokens[2]))
+      { std::printf("--> unknown menu item \"%s\"\n", tokens[2].c_str());
+        return false; }
 
-    return tokens; }
+      storage[root/"menu items"/tokens[2]/"description"] = tokens[1]; }
 
-  bool conf_translator(std::list<std::string> tokens)
-  { unsigned int pos = 0;
+    else { std::printf("--> 'add_description' command requires 2 or 3 "
+                       "arguments\n"); } }
+  
+  else if (tokens[0] == "add_default")
+  { if (tokens.size() == 2)
+    { if (context.empty())
+      { std::printf("--> context is empty, nowhere to add default\n");
+        return false; }
 
-    conf_command current = conf_command::unknown;
-    std::string context;
+      if (!storage.chk(root/"menu items"/context))
+      { std::printf("--> unknown menu item \"%s\"\n", context.c_str());
+        return false; }
 
-    for (std::string token : tokens)
-    { if (pos == 0) // command
-      { std::printf("--> \"%s\" command given\n", token.c_str());
-        
-        if (token == "variable")
-        { if (tokens.size() < 2)
-          { std::printf("-->\"variable\" command requires an argument(s)\n");
-            return false; }
-         
-          current = conf_command::variable;
-          context.clear(); }
+      storage[root/"menu items"/context/"default"] = tokens[1]; }
 
-        else if (token == "assign")
-        { if (tokens.size() < 2)
-          { std::printf("--> \"assign\" command requires at least one "
-                        "argument\n");
-            return false; }
+    else if (tokens.size() == 3)
+    { if (!storage.chk(root/"menu items"/tokens[2]))
+      { std::printf("--> unknown menu item \"%s\"\n", tokens[2].c_str());
+        return false; }
 
-          if (tokens.size() > 3)
-          { std::printf("--> \"assign\" command supports no more than two "
-                        "arguments\n");
-            return false; }
-        
-          current = conf_command::assign; }
+      storage[root/"menu items"/tokens[2]/"default"] = tokens[1]; }
 
-        else if (token == "menu_item")
-        { if (tokens.size() < 2)
-          { std::printf("--> \"menu_item\" command requires at least one "
-                        "argument\n");
-            return false; }
+    else { std::printf("--> 'add_default' command requires 2 or 3 "
+                       "arguments\n"); } }
+  
+  else if (tokens[0] == "add_case")
+  { if (tokens.size() == 2)
+    { if (context.empty())
+      { std::printf("--> context is empty, nowhere to add case\n");
+        return false; }
 
-          current = conf_command::menu_item;
-          context.clear(); }
+      if (!storage.chk(root/"menu items"/context))
+      { std::printf("--> unknown menu item \"%s\"\n", context.c_str());
+        return false; }
 
-        else if (token == "link_variable")
-        { if (tokens.size() < 2)
-          { std::printf("--> \"link_variable\" command requires at least one "
-                        "argument\n");
-            return false; }
+      int index = storage.ls(root/"menu items"/context/"cases").size();
+      storage[root/"menu items"/context/"cases"/index] = tokens[1]; }
 
-          if (tokens.size() > 3)
-          { std::printf("--> \"link_variable\" command supports no more than "
-                        "two arguments\n");
-            return false; }
+    else if (tokens.size() == 3)
+    { if (!storage.chk(root/"menu items"/tokens[2]))
+      { std::printf("--> unknown menu item \"%s\"\n", tokens[2].c_str());
+        return false; }
 
-          current = conf_command::link_variable;
-          context.clear(); }
+      int index = storage.ls(root/"menu items"/tokens[2]/"cases").size();
+      storage[root/"menu items"/tokens[2]/"cases"/index] = tokens[1]; }
 
-        else if (token == "add_description")
-        { if (tokens.size() < 2)
-          { std::printf("--> \"add_description\" command requires at least one "
-                        "argument\n");
-            return false; }
+    else { std::printf("--> 'add_case' command requires 2 or 3 "
+                       "arguments\n"); } }
+  
+  else { std::printf("--> unknown command \"%s\"\n", tokens[0].c_str());
+         return false; }
 
-          if (tokens.size() > 3)
-          { std::printf("--> \"add_description\" command supports no more than "
-                        "two arguments\n");
-            return false; }
+  return true; }
 
-          current = conf_command::add_description; }
+bool mpp_parser::req_translator(std::string line)
+{ if (line.empty()) { req_stage = req_parsing_stage::empty_line; return true; }
 
-        else if (token == "add_default")
-        { if (tokens.size() < 2)
-          { std::printf("--> \"add_default\" command requires at least one "
-                        "argument\n");
-            return false; }
+  if (req_stage == req_parsing_stage::empty_line)
+  { req_stage = req_parsing_stage::index; }
+  else if (req_stage == req_parsing_stage::index)
+  { req_stage = req_parsing_stage::title; }
+  else if (req_stage == req_parsing_stage::title)
+  { req_stage = req_parsing_stage::description; }
 
-          if (tokens.size() > 3)
-          { std::printf("--> \"add_default\" command supports no more than two "
-                        "arguments\n");
-            return false; }
+  if (req_stage == req_parsing_stage::index) { req_idx = line; }
+  else if (req_stage == req_parsing_stage::title)
+  { storage[root/"requirements"/req_idx/"title"] = line; }
+  else if (req_stage == req_parsing_stage::description)
+  { std::string description
+    = storage[root/"requirements"/req_idx/"description"];
+    description.append(line);
+    storage[root/"requirements"/req_idx/"description"] = description; }
 
-          current = conf_command::add_default; }
+  return true; }
 
-        else if (token == "add_case")
-        { if (tokens.size() < 2)
-          { std::printf("--> \"add_case\" command requires at least one "
-                        "argument\n");
-            return false; }
+bool mpp_parser::build_translator(std::vector<std::string> tokens)
+{ if (!tokens.size()) { return true; }
 
-          if (tokens.size() > 3)
-          { std::printf("--> \"add_case\" command supports no more than two "
-                        "arguments\n");
-            return false; }
-        
-          current = conf_command::add_case; }
+  if (tokens[0] == "target")
+  { if (tokens.size() != 2)
+    { std::printf("--> 'target' command requires one argument only\n");
+      return false; }
 
-        else { std::printf("--> unknown command: \"%s\"\n", token.c_str());
-               return false; } }
+    build_target = tokens[1]; }
+  
+  else if (tokens[0] == "command")
+  { if (tokens.size() != 2)
+    { std::printf("--> 'command' command requires one argument only\n");
+      return false; }
 
-      else // arguments
-      { if (current == conf_command::variable)
-        { std::printf("--> creating variable \"%s\"\n", token.c_str());
-          context = token; }
+    if (build_target.empty())
+    { std::printf("--> target is not specified\n"); return false; }
 
-        if (current == conf_command::assign)
-        { if (pos == 1) { std::printf("--> assignment value \"%s\"\n",
-                                      token.c_str()); }
-          if (pos == 2) { std::printf("--> assignment target \"%s\"\n",
-                                      token.c_str()); }
+    int idx = storage.ls(root/"build"/build_target/"commands").size();
+    storage[root/"build"/build_target/"commands"/idx] = tokens[1]; }
+  
+  else if (tokens[0] == "source")
+  { if (tokens.size() < 2)
+    { std::printf("--> 'source' command requires at least one argument\n");
+      return false; }
 
-          if (tokens.size() == 2 && pos == 1)
-          { std::printf("--> execute assignment to context\n"); }
+    if (build_target.empty())
+    { std::printf("--> target is not specified\n"); return false; }
 
-          if (tokens.size() == 3 && pos == 2)
-          { std::printf("--> execute assignment to specified variable\n"); } }
+    for (unsigned int i = 1; i < tokens.size(); i++)
+    { int idx = storage.ls(root/"build"/build_target/"sources").size();
+      storage[root/"build"/build_target/"sources"/idx] = tokens[i]; } }
+  
+  else if (tokens[0] == "dependency")
+  { if (tokens.size() < 2)
+    { std::printf("--> 'dependency' command requires at least one argument\n");
+      return false; }
 
-        if (current == conf_command::menu_item)
-        { std::printf("--> creating menu item \"%s\"\n", token.c_str());
-          context = token; }
+    if (build_target.empty())
+    { std::printf("--> target is not specified\n"); return false; }
 
-        if (current == conf_command::link_variable)
-        { if (pos == 1) { std::printf("--> linking value \"%s\"\n",
-                                      token.c_str()); }
-          if (pos == 2) { std::printf("--> linking target \"%s\"\n",
-                                      token.c_str()); }
+    for (unsigned int i = 1; i < tokens.size(); i++)
+    { storage[root/"build"/build_target/"dependencies"/tokens[i]]; } }
 
-          if (token.size() == 2 && pos == 1)
-          { std::printf("--> execute variable linking to context\n"); }
+  else
+  { std::printf("--> unknown command \"%s\"\n", tokens[0].c_str());
+    return false; }
 
-          if (token.size() == 3 && pos == 2)
-          { std::printf("--> execute variable linking to menu item\n"); } }
-      }
+  return true; }
 
-      pos++; }
+bool mpp_parser::test_translator(std::vector<std::string> tokens)
+{ if (!tokens.size()) { return true; }
 
-    return true; }
-};
+  if (tokens[0] == "target")
+  { if (tokens.size() != 2)
+    { std::printf("--> 'target' command requires one argument only\n");
+      return false; }
 
-int main(int argc, char** argv)
-{ independency::cli_parser parser(argc, argv);
+    test_target = tokens[1]; }
 
-  if (!parser.count("--in")) { std::printf("Nothing to process\n"); return 0; }
+  else if (tokens[0] == "command")
+  { if (tokens.size() != 2)
+    { std::printf("--> 'command' command requires one argument only\n");
+      return false; }
 
-  std::string filename = parser["--in"];
-  std::ifstream file(filename);
-  if (!file) { std::printf("Can't open %s\n", filename.c_str()); }
+    if (test_target.empty())
+    { std::printf("--> target is not specified\n"); return false; }
 
-  independency::storage stor;
-  mpp_parser mp(stor);
-  std::string line;
-  while (std::getline(file, line))
-  { std::printf("%s\n", line.c_str());
-    if (!mp.input(line)) { break; } }
+    int idx = storage.ls(root/"tests"/test_target/"commands").size();
+    storage[root/"tests"/test_target/"commands"/idx] = tokens[1]; }
 
-  return 0; }
+  else if (tokens[0] == "source")
+  { if (tokens.size() < 2)
+    { std::printf("--> 'source' command requires at least one argument\n");
+      return false; }
+
+    if (test_target.empty())
+    { std::printf("--> target is not specified\n"); return false; }
+
+    for (unsigned int i = 1; i < tokens.size(); i++)
+    { int idx = storage.ls(root/"tests"/test_target/"sources").size();
+      storage[root/"tests"/test_target/"sources"/idx] = tokens[i]; } }
+
+  else if (tokens[0] == "dependency")
+  { if (tokens.size() < 2)
+    { std::printf("--> 'dependency' command requires at least one argument\n");
+      return false; }
+
+    if (test_target.empty())
+    { std::printf("--> target is not specified\n"); return false; }
+
+    for (unsigned int i = 1; i < tokens.size(); i++)
+    { int idx = storage.ls(root/"tests"/test_target/"dependencies").size();
+      storage[root/"tests"/test_target/"dependencies"/idx] = tokens[i]; } }
+
+  else
+  { std::printf("--> unknown command \"%s\"\n", tokens[0].c_str());
+    return false; }
+
+  return true; }
+
+bool mpp_parser::deploy_translator(std::vector<std::string> tokens)
+{ if (!tokens.size()) { return true; }
+
+  if (tokens[0] == "target")
+  { if (tokens.size() != 2)
+    { std::printf("--> 'target' command requires one argument only\n");
+      return false; }
+
+    deploy_target = tokens[1]; }
+
+  else if (tokens[0] == "command")
+  { if (tokens.size() != 2)
+    { std::printf("--> 'command' command requires one argument only\n");
+      return false; }
+
+    if (deploy_target.empty())
+    { std::printf("--> target is not specified\n"); return false; }
+
+    int idx = storage.ls(root/"deployment"/deploy_target/"commands").size();
+    storage[root/"deployment"/deploy_target/"commands"/idx] = tokens[1]; }
+
+  else if (tokens[0] == "build")
+  { if (tokens.size() < 2)
+    { std::printf("--> 'build' command requires at least one argument\n");
+      return false; }
+
+    if (deploy_target.empty())
+    { std::printf("--> target is not specified\n"); return false; }
+
+    for (unsigned int i = 1; i < tokens.size(); i++)
+    { int idx = storage.ls(root/"deployment"/deploy_target/"objects").size();
+      storage[root/"deployment"/deploy_target/"objects"/idx] = tokens[i]; } }
+
+  return true; }

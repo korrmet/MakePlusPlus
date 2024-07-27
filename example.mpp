@@ -1,8 +1,14 @@
 * CONFIGURATION
 
 # A simple example of configuring compiler
-variable cc path cc_abs
-assign $(path)/$(cc) cc_abs
+variable cc path cc_abs suffix
+assign $path$/$cc$ cc_abs
+assign -arm suffix
+
+assign "/usr/bin"    path
+# assign "gcc$suff$" cc
+# assign "gcc$suffix" cc
+assign "gcc$suffix$" cc
 
 variable version
 assign "0.1a"
@@ -19,8 +25,46 @@ add_case        clang
 
 * REQUIREMENTS
 
+r1
+Title
+Description 
+Line 1 
+Line 2
+
+r2
+Title
+Description
+
+r3
+Title
+Description
+
 * BUILD
+
+target program.o
+command "$cc_abs$ -c main.cpp program.cpp -o program.o"
+source main.cpp program.cpp program.hpp
+
+target program
+command "$cc_abs$ program.o -o program"
+dependency program.o
 
 * TEST
 
+target unit
+source program.cpp
+dependency static_check
+command "$cc_abs$ program.cpp tests/program.cpp - tests/program.test"
+command "./tests/program.test"
+
+target static_check
+source program.cpp
+command "cppcheck program.cpp"
+
 * DEPLOY
+
+target package
+build program
+command "mkdir release_$version$"
+command "cp program release_$version$"
+command "7z release_$version$"

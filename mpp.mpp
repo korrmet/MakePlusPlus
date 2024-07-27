@@ -1,0 +1,43 @@
+* CONFIGURATION
+
+variable cxx
+
+menu_item cxx
+link_variable cxx
+add_description "C++ Compiler"
+add_default g++
+
+variable flags
+menu_item flags
+link_variable flags
+add_description "Additional compiler flags (optional)"
+
+* BUILD
+
+target main.o
+command "$cxx$ -c main.cpp -o main.o $flags$"
+source main.cpp Independency/independency.hpp
+
+target parser.o
+command "$cxx$ -c parser.cpp -o parser.o $flags$"
+source parser.cpp parser.hpp Independency/independency.hpp
+
+target builder.o
+command "$cxx$ -c builder.cpp -o builder.o $flags$"
+source builder.cpp builder.hpp Independency/independency.hpp expression.cpp expression.hpp
+
+target configurator.o
+command "$cxx$ -c configurator.cpp -o configurator.o $flags$"
+source configurator.cpp configurator.hpp Independency/independency.hpp
+
+target  expression.o
+command "$cxx$ -c expression.cpp -o expression.o $flags$"
+source expression.cpp expression.hpp Independency/independency.hpp
+
+target req_checker.o
+command "$cxx$ -c req_checker.cpp -o req_checker.o $flags$"
+source req_checker.cpp req_checker.hpp Independency/independency.hpp
+
+target mpp_
+command "$cxx$ main.o parser.o builder.o configurator.o expression.o req_checker.o -o mpp_"
+dependency main.o parser.o builder.o configurator.o expression.o req_checker.o
